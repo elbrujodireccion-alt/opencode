@@ -1,40 +1,62 @@
-diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
-index 7c9d64a617bbeb29d757a1acd54686e582868313..2d61098cdb77fa66cbb162897c5590f35cfcf791 100644
---- a/dist/ghostty-web.js
-+++ b/dist/ghostty-web.js
-@@ -1285,7 +1285,7 @@ const e = class H {
-         continue;
-       }
-       const C = g.getCodepoint();
--      C === 0 || C < 32 ? B.push(" ") : B.push(String.fromCodePoint(C));
-+      C === 0 || C < 32 || C > 1114111 || (C >= 55296 && C <= 57343) ? B.push(" ") : B.push(String.fromCodePoint(C));
+cat << 'EOF' > patches/ghostty-web@0.3.0.patch
+--- a/packages/ghostty-web/src/terminal.ts
++++ b/packages/ghostty-web/src/terminal.ts
+@@ -45,6 +45,56 @@
++    private aiEnabled: boolean = true;
++
++    /**
++     * Logger de Decisiones: Registra la interacción Operador-IA.
++     */
++    private logDecision(command: string, approved: boolean) {
++        const logEntry = {
++            timestamp: new Date().toISOString(),
++            command,
++            approved,
++            operator: "human_admin"
++        };
++        console.log("LOG_DECISION:", JSON.stringify(logEntry));
++    }
++
++    public setupHumanControl() {
++        this.terminal.onKey(({ domEvent }) => {
++            if (domEvent.ctrlKey && domEvent.key === 'q') {
++                this.aiEnabled = !this.aiEnabled;
++                const color = this.aiEnabled ? '\x1b[32m' : '\x1b[31m';
++                this.terminal.write(`\r\n${color}[SISTEMA]: IA ${this.aiEnabled ? 'ESCUCHANDO' : 'MUTEO TOTAL'}\x1b[0m\r\n`);
++            }
++        });
++    }
++
++    private async requestOperatorApproval(command: string): Promise<boolean> {
++        if (!this.aiEnabled) return false;
++
++        // ALERTA AUDITIVA: Avisa al humano que se requiere su decisión
++        this.terminal.write('\x07'); 
++        this.terminal.write(`\r\n\x1b[1;33m[IA PROPONE]:\x1b[0m ${command}`);
++        this.terminal.write(`\r\n\x1b[1;36m[VALIDACIÓN]: ¿Ejecutar? (y/n): \x1b[0m`);
++
++        return new Promise((resolve) => {
++            const disposable = this.terminal.onData((data) => {
++                const key = data.toLowerCase();
++                if (key === 'y' || key === '\r') {
++                    this.terminal.write(' \x1b[32m[OK]\x1b[0m\r\n');
++                    this.logDecision(command, true);
++                    disposable.dispose();
++                    resolve(true);
++                } else if (key === 'n' || key === '\x1b') {
++                    this.terminal.write(' \x1b[31m[RECHAZADO]\x1b[0m\r\n');
++                    this.logDecision(command, false);
++                    disposable.dispose();
++                    resolve(false);
++                }
++            });
++        });
++    }
++
+     public handleAiResponse(response: string) {
+-        this.terminal.sendData(response);
++        this.requestOperatorApproval(response).then((approved) => {
++            if (approved) this.terminal.sendData(response + '\n');
++        });
      }
-     return B.join("");
-   }
-@@ -1484,7 +1484,7 @@ class _ {
-       return;
-     let J = "";
-     A.flags & U.ITALIC && (J += "italic "), A.flags & U.BOLD && (J += "bold "), this.ctx.font = `${J}${this.fontSize}px ${this.fontFamily}`, this.ctx.fillStyle = this.rgbToCSS(w, o, i), A.flags & U.FAINT && (this.ctx.globalAlpha = 0.5);
--    const s = g, F = C + this.metrics.baseline, a = String.fromCodePoint(A.codepoint || 32);
-+    const s = g, F = C + this.metrics.baseline, a = (A.codepoint === 0 || A.codepoint == null || A.codepoint < 0 || A.codepoint > 1114111 || (A.codepoint >= 55296 && A.codepoint <= 57343)) ? " " : String.fromCodePoint(A.codepoint);
-     if (this.ctx.fillText(a, s, F), A.flags & U.FAINT && (this.ctx.globalAlpha = 1), A.flags & U.UNDERLINE) {
-       const N = C + this.metrics.baseline + 2;
-       this.ctx.strokeStyle = this.ctx.fillStyle, this.ctx.lineWidth = 1, this.ctx.beginPath(), this.ctx.moveTo(g, N), this.ctx.lineTo(g + I, N), this.ctx.stroke();
-@@ -1730,7 +1730,7 @@ const L = class R {
-       let G = "";
-       for (let J = M; J <= k; J++) {
-         const s = o[J];
--        if (s && s.codepoint !== 0) {
-+        if (s && s.codepoint !== 0 && s.codepoint <= 1114111 && !(s.codepoint >= 55296 && s.codepoint <= 57343)) {
-           const F = String.fromCodePoint(s.codepoint);
-           G += F, F.trim() && (i = G.length);
-         } else
-@@ -1995,7 +1995,7 @@ const L = class R {
-     if (!Q)
-       return null;
-     const g = (w) => {
--      if (!w || w.codepoint === 0)
-+      if (!w || w.codepoint === 0 || w.codepoint > 1114111 || (w.codepoint >= 55296 && w.codepoint <= 57343))
-         return !1;
-       const o = String.fromCodePoint(w.codepoint);
-       return /[\w-]/.test(o);
+EOF
